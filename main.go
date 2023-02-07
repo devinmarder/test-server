@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 	"strings"
 )
 
-var addr = flag.String("addr", ":8000", "the server port")
+var addr = flag.String("port", ":8000", "the server port")
 
 func main() {
 	flag.Parse()
@@ -30,23 +31,30 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch subs[1] {
 	case "codes":
-		setHeaderStatus(w, subs[2:])
-
+		code := subs[2]
+		log.Printf("received request for code: %s", code)
+		setHeaderStatus(w, code)
+		b, _ := json.Marshal(response{Code: subs[2]})
+		w.Write(b)
 		return
 	}
 }
 
-func setHeaderStatus(w http.ResponseWriter, subs []string) {
-	if len(subs) != 1 {
+func setHeaderStatus(w http.ResponseWriter, c string) {
+	if c == "" {
 		w.WriteHeader(http.StatusBadRequest)
 
 		return
 	}
-	code, err := strconv.Atoi(subs[0])
+	code, err := strconv.Atoi(c)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 
 		return
 	}
 	w.WriteHeader(code)
+}
+
+type response struct {
+	Code string
 }
