@@ -3,10 +3,16 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var addr = flag.String("port", ":8000", "the server port")
@@ -14,14 +20,19 @@ var addr = flag.String("port", ":8000", "the server port")
 func main() {
 	flag.Parse()
 	log.Printf("starting test server on port: %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, &server{}))
+	s := &server{metrics: metrics{metrics: make(map[string][]metric)}}
+	go s.writeMetrics()
+	log.Fatal(http.ListenAndServe(*addr, s))
 }
 
 type server struct {
+	mx      sync.Mutex
+	metrics metrics
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	s.metrics.Update(path)
 	subs := strings.Split(path, "/")
 	if len(subs) == 0 {
 		return
@@ -32,7 +43,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch subs[1] {
 	case "codes":
 		code := subs[2]
-		log.Printf("received request for code: %s", code)
 		setHeaderStatus(w, code)
 		b, _ := json.Marshal(response{Code: subs[2]})
 		w.Write(b)
@@ -58,3 +68,64 @@ func setHeaderStatus(w http.ResponseWriter, c string) {
 type response struct {
 	Code string
 }
+
+type metrics struct {
+	mx      sync.Mutex
+	metrics map[string][]metric
+}
+
+func (m *metrics) Update(path string) {
+	m.mx.Lock()
+	defer m.mx.Unlock()
+	if _, ok := m.metrics[path]; !ok {
+		m.metrics[path] = []metric{&totalMetric{}}
+	}
+	for _, v := range m.metrics[path] {
+		v.inc()
+	}
+}
+
+func (s *server) writeMetrics() {
+	w := io.Writer(os.Stdout)
+	for {
+		lines := s.metrics.displayMetrics(w)
+		time.Sleep(1 * time.Second)
+		_, _ = fmt.Fprint(w, strings.Repeat(clear, lines))
+	}
+}
+
+func (m *metrics) displayMetrics(w io.Writer) int {
+	m.mx.Lock()
+	defer m.mx.Unlock()
+	lines := 0
+	for k, v := range m.metrics {
+		fmt.Fprintf(w, "endpoint: %s\n", k)
+		lines++
+		for _, m := range v {
+			fmt.Fprintf(w, "\t-%s\n", m.string())
+			lines++
+		}
+	}
+	return lines
+}
+
+type metric interface {
+	inc()
+	string() string
+}
+
+type totalMetric struct {
+	total atomic.Int64
+}
+
+func (t *totalMetric) inc() {
+	t.total.Add(1)
+}
+
+func (t *totalMetric) string() string {
+	return "total requests: " + strconv.FormatInt(t.total.Load(), 10)
+}
+
+const ESC = 27
+
+var clear = fmt.Sprintf("%c[%dA%c[2K", ESC, 1, ESC)
