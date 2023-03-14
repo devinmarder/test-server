@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ func (m *metrics) Update(path string) {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	if _, ok := m.metrics[path]; !ok {
-		m.metrics[path] = []metric{&totalMetric{}}
+		m.metrics[path] = []metric{&totalMetric{}, NewRateMetric(1 * time.Second)}
 	}
 	for _, v := range m.metrics[path] {
 		v.inc()
@@ -98,10 +99,16 @@ func (m *metrics) displayMetrics(w io.Writer) int {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	lines := 0
-	for k, v := range m.metrics {
-		fmt.Fprintf(w, "endpoint: %s\n", k)
+	keys := make([]string, 0, len(m.metrics))
+	for k, _ := range m.metrics {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		fmt.Fprintf(w, "%s\n", k)
 		lines++
-		for _, m := range v {
+		for _, m := range m.metrics[k] {
 			fmt.Fprintf(w, "\t-%s\n", m.string())
 			lines++
 		}
@@ -123,7 +130,37 @@ func (t *totalMetric) inc() {
 }
 
 func (t *totalMetric) string() string {
-	return "total requests: " + strconv.FormatInt(t.total.Load(), 10)
+	return "total:\t" + strconv.FormatInt(t.total.Load(), 10) + " reqs"
+}
+
+type rateMetric struct {
+	period time.Duration
+	count  atomic.Int64
+	rate   atomic.Int64
+}
+
+func NewRateMetric(period time.Duration) *rateMetric {
+	r := &rateMetric{period: period}
+	r.Run()
+	return r
+}
+
+func (r *rateMetric) Run() {
+	go func() {
+		t := time.NewTicker(r.period)
+		for range t.C {
+			r.rate.Store(r.count.Load() / int64(r.period.Seconds()))
+			r.count.Store(0)
+		}
+	}()
+}
+
+func (r *rateMetric) inc() {
+	r.count.Add(1)
+}
+
+func (r *rateMetric) string() string {
+	return "rate:\t" + strconv.FormatInt(r.rate.Load(), 10) + " reqs/s"
 }
 
 const ESC = 27
