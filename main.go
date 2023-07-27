@@ -27,7 +27,6 @@ func main() {
 }
 
 type server struct {
-	mx      sync.Mutex
 	metrics metrics
 }
 
