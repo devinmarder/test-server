@@ -48,6 +48,17 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(response{Code: subs[2]})
 		w.Write(b)
 		return
+	case "delay":
+		delay := subs[2]
+		d, err := strconv.Atoi(delay)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		time.Sleep(time.Duration(d) * time.Millisecond)
+		b, _ := json.Marshal(response{Code: "200"})
+		w.Write(b)
+		return
 	}
 }
 
