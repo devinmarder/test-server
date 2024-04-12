@@ -110,7 +110,7 @@ func (m *metrics) displayMetrics(w io.Writer) int {
 	defer m.mx.Unlock()
 	lines := 0
 	keys := make([]string, 0, len(m.metrics))
-	for k, _ := range m.metrics {
+	for k := range m.metrics {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
